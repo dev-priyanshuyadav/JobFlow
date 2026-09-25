@@ -4,6 +4,10 @@ JobFlow is a focused, full-stack workspace for managing a modern job search. Tra
 
 > A polished React and Express portfolio project with server-backed authentication, application workflows, analytics, and Netlify deployment support.
 
+## Live Demo
+
+Visit the deployed application: [demo-jobflow.netlify.app](https://demo-jobflow.netlify.app/)
+
 ## Product Highlights
 
 - Dashboard with application metrics, activity charts, funnel progress, and upcoming actions
