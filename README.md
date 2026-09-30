@@ -8,6 +8,15 @@ JobFlow is a focused, full-stack workspace for managing a modern job search. Tra
 
 Visit the deployed application: [demo-jobflow.netlify.app](https://demo-jobflow.netlify.app/)
 
+## Demo account
+
+Use these credentials to explore the app immediately:
+
+```text
+Email:    demo@jobflow.app
+Password: demo1234
+```
+
 ## Product Highlights
 
 - Dashboard with application metrics, activity charts, funnel progress, and upcoming actions
@@ -88,6 +97,9 @@ The backend exposes the following authenticated workflows:
 - `GET|POST|PATCH|DELETE /api/resumes` - Manage resume records
 - `PATCH /api/preferences` - Update notification and theme preferences
 - `DELETE /api/account` - Delete the current account
+- `POST /api/billing/checkout` - Start Stripe subscription checkout
+- `GET /api/billing/checkout/:sessionId` - Verify a completed checkout
+- `POST /api/billing/webhook` - Sync Stripe subscription lifecycle events
 
 ## Netlify Deployment
 
@@ -116,6 +128,20 @@ The included redirects route `/api/*` to the serverless API and route client-sid
 npx netlify login
 npx netlify deploy --prod
 ```
+
+## Pro Subscriptions
+
+Pro uses Stripe-hosted recurring Checkout. Create a recurring Stripe price (set it to `$12/month` to match the pricing page) and configure these environment variables for both the API and Netlify deployment:
+
+```text
+STRIPE_SECRET_KEY=sk_...
+STRIPE_PRICE_ID=price_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+APP_URL=https://your-site.example
+SESSION_SECRET=<a long random secret>
+```
+
+Set `APP_URL` to the deployed site origin. For local development, use `http://localhost:5173`. Generate a session secret with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. Configure a Stripe webhook at `/api/billing/webhook` for `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Checkout only activates Pro after the API verifies the completed Stripe session for the signed-in account; signed webhook events keep later subscription changes in sync.
 
 ## Persistence Note
 

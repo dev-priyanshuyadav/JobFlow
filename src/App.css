@@ -815,6 +815,46 @@ textarea:focus-visible {
 .auth-header .brand {
   justify-content: center;
 }
+.demo-credentials {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 16px 16px 14px;
+  border: 1px solid #dfeaff;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f3f8ff, #eef8ff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.demo-pill {
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(23, 105, 224, 0.08);
+  color: var(--blue);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.demo-credentials-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(23, 105, 224, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+.demo-credentials-row span {
+  color: var(--muted-ink);
+}
+.demo-fill-button {
+  justify-self: start;
+  padding-inline: 12px;
+}
 .form-stack {
   display: grid;
   gap: 15px;
