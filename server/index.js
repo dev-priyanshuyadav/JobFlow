@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDirectory = path.join(__dirname, "data");
+const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
+const dataDirectory = path.join(serverDirectory, "data");
 const dataFile = path.join(dataDirectory, "jobflow.json");
 const port = Number(process.env.PORT || 3001);
 if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
@@ -697,7 +697,7 @@ app.delete("/api/account", requireUser, (request, response) => {
   response.status(204).end();
 });
 
-const clientDist = path.join(__dirname, "..", "dist");
+const clientDist = path.join(serverDirectory, "..", "dist");
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
   app.use((_request, response) =>
