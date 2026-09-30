@@ -15,6 +15,7 @@ export type ApiSession = {
 export type Subscription = {
   plan: "free" | "pro";
   status: "free" | "active";
+  source?: "demo" | "stripe";
 };
 
 export type CheckoutSession = {
@@ -60,6 +61,12 @@ export function logIn(email: string, password: string) {
 
 export function createCheckoutSession() {
   return request<CheckoutSession>("/api/billing/checkout", {
+    method: "POST",
+  });
+}
+
+export function demoPurchase() {
+  return request<{ subscription: Subscription }>("/api/billing/demo-purchase", {
     method: "POST",
   });
 }

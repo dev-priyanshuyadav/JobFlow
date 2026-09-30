@@ -491,12 +491,28 @@ app.post("/api/billing/webhook", (request, response) => {
       user.subscription = {
         plan: active ? "pro" : "free",
         status: active ? "active" : "free",
+        source: "stripe",
         stripeSubscriptionId: stripeSubscription.id,
       };
       saveDatabase();
     }
   }
   response.json({ received: true });
+});
+
+app.post("/api/billing/demo-purchase", requireUser, (request, response) => {
+  if (request.user.email.toLowerCase() !== "demo@jobflow.app")
+    return response
+      .status(403)
+      .json({ error: "Demo purchases are only available on the demo account" });
+
+  request.user.subscription = {
+    plan: "pro",
+    status: "active",
+    source: "demo",
+  };
+  saveDatabase();
+  response.json({ subscription: request.user.subscription });
 });
 
 app.post("/api/billing/checkout", requireUser, async (request, response) => {
@@ -568,6 +584,7 @@ app.get(
     request.user.subscription = {
       plan: "pro",
       status: "active",
+      source: "stripe",
       stripeSubscriptionId: checkout.subscription,
     };
     saveDatabase();

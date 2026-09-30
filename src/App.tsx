@@ -54,6 +54,7 @@ import {
   deleteAccount,
   deleteApplication,
   deleteResume,
+  demoPurchase,
   getSession,
   logIn,
   logOut,
@@ -837,6 +838,10 @@ function AppShell({
                           preferences={preferences}
                           setPreferences={setPreferences}
                           subscription={subscription}
+                          setSubscription={setSubscription}
+                          demoAccount={
+                            profile?.email.toLowerCase() === "demo@jobflow.app"
+                          }
                           deleteAccount={deleteAccount}
                         />
                       }
@@ -3151,6 +3156,8 @@ function SettingsPage({
   preferences,
   setPreferences,
   subscription,
+  setSubscription,
+  demoAccount,
   deleteAccount,
 }: {
   setTheme: (value: Theme) => void;
@@ -3158,9 +3165,12 @@ function SettingsPage({
   preferences: Preferences;
   setPreferences: (value: Preferences) => void;
   subscription: Subscription;
+  setSubscription: (value: Subscription) => void;
+  demoAccount: boolean;
   deleteAccount: () => void;
 }) {
   const [billingError, setBillingError] = useState("");
+  const [demoPurchasePending, setDemoPurchasePending] = useState(false);
 
   const handleUpgrade = async () => {
     setBillingError("");
@@ -3171,6 +3181,23 @@ function SettingsPage({
       setBillingError(
         error instanceof Error ? error.message : "Unable to start checkout",
       );
+    }
+  };
+
+  const handleDemoPurchase = async () => {
+    setBillingError("");
+    setDemoPurchasePending(true);
+    try {
+      const result = await demoPurchase();
+      setSubscription(result.subscription);
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Unable to apply demo purchase",
+      );
+    } finally {
+      setDemoPurchasePending(false);
     }
   };
 
@@ -3190,7 +3217,9 @@ function SettingsPage({
               <span>Current plan</span>
               <strong>
                 {subscription.plan === "pro" && subscription.status === "active"
-                  ? "Pro"
+                  ? subscription.source === "demo"
+                    ? "Pro (demo)"
+                    : "Pro"
                   : "Free"}
               </strong>
             </div>
@@ -3203,6 +3232,24 @@ function SettingsPage({
               >
                 Upgrade to Pro
               </button>
+            ) : null}
+            {demoAccount && subscription.plan !== "pro" ? (
+              <button
+                className="button-secondary"
+                type="button"
+                style={{ width: "100%" }}
+                disabled={demoPurchasePending}
+                onClick={() => void handleDemoPurchase()}
+              >
+                {demoPurchasePending
+                  ? "Applying demo purchase..."
+                  : "Try Pro demo"}
+              </button>
+            ) : null}
+            {demoAccount && subscription.source === "demo" ? (
+              <div className="small-muted">
+                Demo Pro is active. No payment was taken.
+              </div>
             ) : null}
             {billingError ? (
               <div className="form-error" role="alert">
