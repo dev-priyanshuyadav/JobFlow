@@ -16,6 +16,7 @@ const dataDirectory = isServerless
   : path.join(serverDirectory, "data");
 const dataFile = path.join(dataDirectory, "jobflow.json");
 const port = Number(process.env.PORT || 3001);
+const demoUserId = "jobflow-demo-account";
 if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be configured in production");
 }
@@ -220,9 +221,9 @@ function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
 }
 
-function createUser(name, email, password) {
+function createUser(name, email, password, userId = crypto.randomUUID()) {
   return {
-    id: crypto.randomUUID(),
+    id: userId,
     name,
     email: email.toLowerCase(),
     passwordHash: hashPassword(password),
@@ -244,12 +245,19 @@ function loadDatabase() {
   fs.mkdirSync(dataDirectory, { recursive: true });
   if (!fs.existsSync(dataFile)) {
     const database = {
-      users: [createUser("Aarav Desai", "demo@jobflow.app", "demo1234")],
+      users: [
+        createUser("Aarav Desai", "demo@jobflow.app", "demo1234", demoUserId),
+      ],
     };
     fs.writeFileSync(dataFile, JSON.stringify(database, null, 2));
     return database;
   }
-  return JSON.parse(fs.readFileSync(dataFile, "utf8"));
+  const database = JSON.parse(fs.readFileSync(dataFile, "utf8"));
+  const demoUser = database.users.find(
+    (user) => user.email === "demo@jobflow.app",
+  );
+  if (demoUser) demoUser.id = demoUserId;
+  return database;
 }
 
 const database = loadDatabase();
