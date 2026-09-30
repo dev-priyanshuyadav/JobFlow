@@ -1,14 +1,16 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import express from "express";
 
-const serverDirectory =
-  typeof __dirname === "string"
-    ? __dirname
-    : path.dirname(fileURLToPath(import.meta.url));
-const dataDirectory = path.join(serverDirectory, "data");
+const serverDirectory = path.resolve(process.cwd(), "server");
+const isServerless = Boolean(
+  process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME,
+);
+const dataDirectory = isServerless
+  ? path.join(os.tmpdir(), "jobflow-data")
+  : path.join(serverDirectory, "data");
 const dataFile = path.join(dataDirectory, "jobflow.json");
 const port = Number(process.env.PORT || 3001);
 if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
