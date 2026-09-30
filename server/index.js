@@ -6,7 +6,10 @@ import express from "express";
 
 const serverDirectory = path.resolve(process.cwd(), "server");
 const isServerless = Boolean(
-  process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME,
+  process.env.NETLIFY ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT ||
+  process.cwd().startsWith("/var/task"),
 );
 const dataDirectory = isServerless
   ? path.join(os.tmpdir(), "jobflow-data")
