@@ -8,7 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDirectory = path.join(__dirname, "data");
 const dataFile = path.join(dataDirectory, "jobflow.json");
 const port = Number(process.env.PORT || 3001);
-const sessions = new Map();
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET must be configured in production");
+}
+const sessionSecret =
+  process.env.SESSION_SECRET || "jobflow-local-development-session-secret";
 
 const seedApplications = [
   {
@@ -224,6 +228,7 @@ function createUser(name, email, password) {
       followUpReminders: true,
       weeklySummary: true,
     },
+    subscription: { plan: "free", status: "free" },
   };
 }
 
@@ -266,16 +271,29 @@ database.users.forEach((user) => {
     followUpReminders: true,
     weeklySummary: true,
   };
+  user.subscription ||= { plan: "free", status: "free" };
 });
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(
+  express.json({
+    limit: "1mb",
+    verify(request, _response, buffer) {
+      request.rawBody = Buffer.from(buffer);
+    },
+  }),
+);
 
 function setSessionCookie(response, userId) {
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, userId);
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  const payload = `${userId}.${expiresAt}`;
+  const signature = crypto
+    .createHmac("sha256", sessionSecret)
+    .update(payload)
+    .digest("hex");
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   response.setHeader(
     "Set-Cookie",
-    `jobflow_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`,
+    `jobflow_session=${payload}.${signature}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`,
   );
 }
 
@@ -289,7 +307,23 @@ function getSessionToken(request) {
 }
 
 function currentUser(request) {
-  const userId = sessions.get(getSessionToken(request));
+  const token = getSessionToken(request);
+  if (!token) return undefined;
+  const [userId, expiresAt, signature, extra] = token.split(".");
+  if (!userId || !expiresAt || !signature || extra) return undefined;
+  const payload = `${userId}.${expiresAt}`;
+  const expectedSignature = crypto
+    .createHmac("sha256", sessionSecret)
+    .update(payload)
+    .digest("hex");
+  const provided = Buffer.from(signature, "hex");
+  const expected = Buffer.from(expectedSignature, "hex");
+  if (
+    provided.length !== expected.length ||
+    !crypto.timingSafeEqual(provided, expected) ||
+    Number(expiresAt) <= Date.now()
+  )
+    return undefined;
   return database.users.find((user) => user.id === userId);
 }
 
@@ -307,6 +341,7 @@ function publicUser(user) {
     name: user.name,
     email: user.email,
     profile: user.profile,
+    subscription: user.subscription || { plan: "free", status: "free" },
   };
 }
 
@@ -345,15 +380,23 @@ app.post("/api/auth/demo", (_request, response) => {
 
 app.post("/api/auth/signup", (request, response) => {
   const { name, email, password } = request.body || {};
-  if (!name || !email || !password || password.length < 8)
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    typeof email !== "string" ||
+    !email.trim() ||
+    typeof password !== "string" ||
+    password.length < 8
+  )
     return response
       .status(400)
       .json({ error: "Name, email, and an 8-character password are required" });
-  if (database.users.some((user) => user.email === String(email).toLowerCase()))
+  const normalizedEmail = email.trim().toLowerCase();
+  if (database.users.some((user) => user.email === normalizedEmail))
     return response
       .status(409)
       .json({ error: "An account with that email already exists" });
-  const user = createUser(String(name), String(email), String(password));
+  const user = createUser(name.trim(), normalizedEmail, password);
   database.users.push(user);
   saveDatabase();
   setSessionCookie(response, user.id);
@@ -369,12 +412,14 @@ app.post("/api/auth/signup", (request, response) => {
 app.post("/api/auth/login", (request, response) => {
   const { email, password } = request.body || {};
   const user = database.users.find(
-    (candidate) => candidate.email === String(email || "").toLowerCase(),
+    (candidate) =>
+      candidate.email ===
+      (typeof email === "string" ? email.trim().toLowerCase() : ""),
   );
   if (
     !user ||
-    !password ||
-    !verifyPassword(String(password), user.passwordHash)
+    typeof password !== "string" ||
+    !verifyPassword(password, user.passwordHash)
   )
     return response.status(401).json({ error: "Invalid email or password" });
   setSessionCookie(response, user.id);
@@ -388,14 +433,139 @@ app.post("/api/auth/login", (request, response) => {
 });
 
 app.post("/api/auth/logout", (request, response) => {
-  const token = getSessionToken(request);
-  if (token) sessions.delete(token);
   response.setHeader(
     "Set-Cookie",
     "jobflow_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
   );
   response.status(204).end();
 });
+
+app.post("/api/billing/webhook", (request, response) => {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const signatureParts = (request.get("stripe-signature") || "").split(",");
+  const timestamp = Number(
+    signatureParts.find((part) => part.startsWith("t="))?.slice(2),
+  );
+  const signatures = signatureParts
+    .filter((part) => part.startsWith("v1="))
+    .map((part) => Buffer.from(part.slice(3), "hex"));
+  if (!webhookSecret || !request.rawBody || !Number.isFinite(timestamp))
+    return response.status(400).json({ error: "Invalid Stripe signature" });
+
+  const expectedSignature = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(Buffer.concat([Buffer.from(`${timestamp}.`), request.rawBody]))
+    .digest();
+  const validSignature =
+    Math.abs(Date.now() / 1000 - timestamp) <= 300 &&
+    signatures.some(
+      (signature) =>
+        signature.length === expectedSignature.length &&
+        crypto.timingSafeEqual(signature, expectedSignature),
+    );
+  if (!validSignature)
+    return response.status(400).json({ error: "Invalid Stripe signature" });
+
+  const { type, data } = request.body || {};
+  if (
+    [
+      "customer.subscription.created",
+      "customer.subscription.updated",
+      "customer.subscription.deleted",
+    ].includes(type)
+  ) {
+    const stripeSubscription = data?.object;
+    const user = database.users.find(
+      (candidate) => candidate.id === stripeSubscription?.metadata?.userId,
+    );
+    if (user) {
+      const active = ["active", "trialing"].includes(stripeSubscription.status);
+      user.subscription = {
+        plan: active ? "pro" : "free",
+        status: active ? "active" : "free",
+        stripeSubscriptionId: stripeSubscription.id,
+      };
+      saveDatabase();
+    }
+  }
+  response.json({ received: true });
+});
+
+app.post("/api/billing/checkout", requireUser, async (request, response) => {
+  const { STRIPE_SECRET_KEY, STRIPE_PRICE_ID } = process.env;
+  const appUrl = process.env.APP_URL || request.get("origin");
+  if (!STRIPE_SECRET_KEY || !STRIPE_PRICE_ID || !appUrl)
+    return response.status(503).json({
+      error:
+        "Pro checkout is not configured. Set STRIPE_SECRET_KEY, STRIPE_PRICE_ID, and APP_URL.",
+    });
+
+  const parameters = new URLSearchParams({
+    mode: "subscription",
+    "line_items[0][price]": STRIPE_PRICE_ID,
+    "line_items[0][quantity]": "1",
+    client_reference_id: request.user.id,
+    customer_email: request.user.email,
+    "subscription_data[metadata][userId]": request.user.id,
+    success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${appUrl}/?checkout=cancelled`,
+  });
+  const stripeResponse = await fetch(
+    "https://api.stripe.com/v1/checkout/sessions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: parameters,
+    },
+  );
+  const checkout = await stripeResponse.json();
+  if (!stripeResponse.ok || !checkout.url)
+    return response.status(502).json({
+      error: checkout.error?.message || "Unable to start Pro checkout",
+    });
+  response.json({ url: checkout.url });
+});
+
+app.get(
+  "/api/billing/checkout/:sessionId",
+  requireUser,
+  async (request, response) => {
+    const { STRIPE_SECRET_KEY } = process.env;
+    if (!STRIPE_SECRET_KEY)
+      return response
+        .status(503)
+        .json({ error: "Pro checkout is not configured" });
+    const stripeResponse = await fetch(
+      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(request.params.sessionId)}`,
+      { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
+    );
+    const checkout = await stripeResponse.json();
+    if (!stripeResponse.ok)
+      return response.status(502).json({
+        error: checkout.error?.message || "Unable to verify checkout",
+      });
+    if (
+      checkout.client_reference_id !== request.user.id ||
+      checkout.mode !== "subscription" ||
+      checkout.status !== "complete" ||
+      !["paid", "no_payment_required"].includes(checkout.payment_status)
+    )
+      return response
+        .status(400)
+        .json({ error: "This checkout is not complete" });
+
+    request.user.subscription = {
+      plan: "pro",
+      status: "active",
+      stripeSubscriptionId: checkout.subscription,
+    };
+    saveDatabase();
+    response.json({ subscription: request.user.subscription });
+  },
+);
 
 app.get("/api/applications", requireUser, (request, response) =>
   response.json(request.user.applications),

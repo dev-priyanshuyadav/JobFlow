@@ -4,11 +4,21 @@ export type ApiSession = {
     name: string;
     email: string;
     profile?: Record<string, string>;
+    subscription?: Subscription;
   };
   applications: unknown[];
   notifications: unknown[];
   resumes: unknown[];
   preferences: Record<string, boolean | string>;
+};
+
+export type Subscription = {
+  plan: "free" | "pro";
+  status: "free" | "active";
+};
+
+export type CheckoutSession = {
+  url: string;
 };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -46,6 +56,18 @@ export function logIn(email: string, password: string) {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
+}
+
+export function createCheckoutSession() {
+  return request<CheckoutSession>("/api/billing/checkout", {
+    method: "POST",
+  });
+}
+
+export function confirmCheckout(sessionId: string) {
+  return request<{ subscription: Subscription }>(
+    `/api/billing/checkout/${encodeURIComponent(sessionId)}`,
+  );
 }
 
 export function logOut() {

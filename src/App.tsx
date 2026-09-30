@@ -23,7 +23,6 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
-  Mail,
   Menu,
   Moon,
   MoreHorizontal,
@@ -49,7 +48,9 @@ import {
 } from "react-router-dom";
 import {
   createApplication,
+  createCheckoutSession,
   createResume,
+  confirmCheckout,
   deleteAccount,
   deleteApplication,
   deleteResume,
@@ -59,6 +60,8 @@ import {
   markNotificationsRead,
   signUp,
   startDemoSession,
+  type ApiSession,
+  type Subscription,
   updatePreferences,
   updateProfile,
   updateResume,
@@ -389,6 +392,11 @@ function App() {
   });
 
   const [demoAuthed, setDemoAuthedState] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [subscription, setSubscription] = useState<Subscription>({
+    plan: "free",
+    status: "free",
+  });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -404,38 +412,44 @@ function App() {
         setProfile((session.user.profile as Profile | undefined) || null);
         setResumes(session.resumes as Resume[]);
         setPreferences(session.preferences as Preferences);
+        setSubscription(
+          session.user.subscription || { plan: "free", status: "free" },
+        );
       })
-      .catch(() => setDemoAuthedState(false));
+      .catch(() => setDemoAuthedState(false))
+      .finally(() => setAuthLoading(false));
   }, []);
 
   const setDemoAuthed = (value: boolean) => {
     if (!value) {
       void logOut();
       setDemoAuthedState(false);
+      setAuthLoading(false);
       setApplications([]);
       setNotifications([]);
       setProfile(null);
       setResumes([]);
+      setSubscription({ plan: "free", status: "free" });
       return;
     }
 
     setDemoAuthedState(true);
-    const applySession = (session: {
-      user: { profile?: Record<string, string> };
-      applications: unknown[];
-      notifications: unknown[];
-      resumes: unknown[];
-      preferences: Record<string, boolean | string>;
-    }) => {
+    setAuthLoading(true);
+    const applySession = (session: ApiSession) => {
       setApplications(session.applications as Application[]);
       setNotifications(session.notifications as NotificationItem[]);
       setProfile((session.user.profile as Profile | undefined) || null);
       setResumes(session.resumes as Resume[]);
       setPreferences(session.preferences as Preferences);
+      setSubscription(
+        session.user.subscription || { plan: "free", status: "free" },
+      );
     };
     void getSession()
       .then(applySession)
-      .catch(() => startDemoSession().then(applySession));
+      .catch(() => startDemoSession().then(applySession))
+      .catch(() => setDemoAuthedState(false))
+      .finally(() => setAuthLoading(false));
   };
 
   const persistApplications = (nextApplications: Application[]) => {
@@ -508,6 +522,9 @@ function App() {
         theme={theme}
         setTheme={setTheme}
         demoAuthed={demoAuthed}
+        authLoading={authLoading}
+        subscription={subscription}
+        setSubscription={setSubscription}
         setDemoAuthed={setDemoAuthed}
         applications={applications}
         notifications={notifications}
@@ -531,6 +548,9 @@ function AppShell({
   theme,
   setTheme,
   demoAuthed,
+  authLoading,
+  subscription,
+  setSubscription,
   setDemoAuthed,
   applications,
   notifications,
@@ -547,6 +567,9 @@ function AppShell({
   theme: Theme;
   setTheme: (value: Theme) => void;
   demoAuthed: boolean;
+  authLoading: boolean;
+  subscription: Subscription;
+  setSubscription: (value: Subscription) => void;
   setDemoAuthed: (value: boolean) => void;
   applications: Application[];
   notifications: NotificationItem[];
@@ -581,7 +604,12 @@ function AppShell({
 
   return (
     <Routes>
-      <Route path="/" element={<LandingPage setDemoAuthed={setDemoAuthed} />} />
+      <Route
+        path="/"
+        element={
+          <LandingPage demoAuthed={demoAuthed} setDemoAuthed={setDemoAuthed} />
+        }
+      />
       <Route
         path="/login"
         element={<LoginPage setDemoAuthed={setDemoAuthed} />}
@@ -597,7 +625,7 @@ function AppShell({
       <Route
         path="/*"
         element={
-          <ProtectedRoute demoAuthed={demoAuthed}>
+          <ProtectedRoute demoAuthed={demoAuthed} authLoading={authLoading}>
             <div className="app-shell">
               <aside
                 className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`}
@@ -754,6 +782,12 @@ function AppShell({
                       element={<DashboardPage applications={applications} />}
                     />
                     <Route
+                      path="/billing/success"
+                      element={
+                        <BillingSuccessPage onConfirmed={setSubscription} />
+                      }
+                    />
+                    <Route
                       path="/applications"
                       element={
                         <ApplicationsPage
@@ -802,6 +836,7 @@ function AppShell({
                           applications={applications}
                           preferences={preferences}
                           setPreferences={setPreferences}
+                          subscription={subscription}
                           deleteAccount={deleteAccount}
                         />
                       }
@@ -829,11 +864,20 @@ function AppShell({
 
 function ProtectedRoute({
   demoAuthed,
+  authLoading,
   children,
 }: {
   demoAuthed: boolean;
+  authLoading: boolean;
   children: React.ReactNode;
 }) {
+  if (authLoading) {
+    return (
+      <div className="auth-shell" role="status">
+        Restoring your session...
+      </div>
+    );
+  }
   if (!demoAuthed) {
     return <Navigate to="/login" replace />;
   }
@@ -841,11 +885,29 @@ function ProtectedRoute({
 }
 
 function LandingPage({
+  demoAuthed,
   setDemoAuthed,
 }: {
+  demoAuthed: boolean;
   setDemoAuthed: (value: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const [checkoutError, setCheckoutError] = useState("");
+
+  const handleUpgrade = async () => {
+    if (!demoAuthed) {
+      navigate("/signup?plan=pro");
+      return;
+    }
+    try {
+      const checkout = await createCheckoutSession();
+      window.location.assign(checkout.url);
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error ? error.message : "Unable to start checkout",
+      );
+    }
+  };
 
   const handleDemo = () => {
     setDemoAuthed(true);
@@ -1163,6 +1225,7 @@ function LandingPage({
               <button
                 className="button-secondary"
                 style={{ marginTop: 18, width: "100%" }}
+                onClick={() => navigate("/signup")}
               >
                 Start free
               </button>
@@ -1191,11 +1254,17 @@ function LandingPage({
               <button
                 className="button-primary"
                 style={{ marginTop: 18, width: "100%" }}
+                onClick={() => void handleUpgrade()}
               >
                 Upgrade to Pro
               </button>
             </div>
           </div>
+          {checkoutError ? (
+            <div className="form-error" role="alert">
+              {checkoutError}
+            </div>
+          ) : null}
         </section>
 
         <div className="final-cta">
@@ -1284,6 +1353,7 @@ function LoginPage({
   setDemoAuthed: (value: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("demo@jobflow.app");
   const [password, setPassword] = useState("demo1234");
   const [error, setError] = useState("");
@@ -1292,7 +1362,11 @@ function LoginPage({
     try {
       await logIn(email, password);
       setDemoAuthed(true);
-      navigate("/dashboard");
+      navigate(
+        searchParams.get("plan") === "pro"
+          ? "/settings?upgrade=pro"
+          : "/dashboard",
+      );
     } catch (loginError) {
       setError(
         loginError instanceof Error ? loginError.message : "Unable to log in",
@@ -1314,6 +1388,28 @@ function LoginPage({
           <p className="small-muted" style={{ marginTop: 6 }}>
             Log in to continue your job search.
           </p>
+        </div>
+
+        <div className="demo-credentials" aria-label="Demo account credentials">
+          <div className="demo-pill">Demo access</div>
+          <div className="demo-credentials-row">
+            <span>Email</span>
+            <strong>demo@jobflow.app</strong>
+          </div>
+          <div className="demo-credentials-row">
+            <span>Password</span>
+            <strong>demo1234</strong>
+          </div>
+          <button
+            type="button"
+            className="button-ghost demo-fill-button"
+            onClick={() => {
+              setEmail("demo@jobflow.app");
+              setPassword("demo1234");
+            }}
+          >
+            Use demo account
+          </button>
         </div>
 
         <div className="form-stack">
@@ -1351,22 +1447,18 @@ function LoginPage({
             className="button-secondary"
             type="button"
             onClick={() => {
-              setDemoAuthed(true);
-              navigate("/dashboard");
-            }}
-          >
-            <Mail
-              size={16}
-              style={{ marginRight: 8, verticalAlign: "middle" }}
-            />
-            Continue with Google
-          </button>
-          <button
-            className="button-ghost"
-            type="button"
-            onClick={() => {
-              setDemoAuthed(true);
-              navigate("/dashboard");
+              void startDemoSession()
+                .then(() => {
+                  setDemoAuthed(true);
+                  navigate("/dashboard");
+                })
+                .catch((demoError) =>
+                  setError(
+                    demoError instanceof Error
+                      ? demoError.message
+                      : "Unable to start demo session",
+                  ),
+                );
             }}
           >
             Continue with Demo
@@ -1394,6 +1486,7 @@ function SignupPage({
   setDemoAuthed: (value: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [name, setName] = useState("Aarav Desai");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1405,7 +1498,11 @@ function SignupPage({
     try {
       await signUp(name, email, password);
       setDemoAuthed(true);
-      navigate("/onboarding");
+      navigate(
+        searchParams.get("plan") === "pro"
+          ? "/settings?upgrade=pro"
+          : "/onboarding",
+      );
     } catch (signupError) {
       setError(
         signupError instanceof Error
@@ -2991,19 +3088,92 @@ function ProfilePage({
   );
 }
 
+function BillingSuccessPage({
+  onConfirmed,
+}: {
+  onConfirmed: (value: Subscription) => void;
+}) {
+  const [message, setMessage] = useState("Confirming your payment...");
+
+  useEffect(() => {
+    let cancelled = false;
+    const sessionId = new URLSearchParams(window.location.search).get(
+      "session_id",
+    );
+    if (!sessionId) {
+      void Promise.resolve().then(() => {
+        if (!cancelled)
+          setMessage("We could not find a checkout session to verify.");
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    void confirmCheckout(sessionId)
+      .then(({ subscription: activeSubscription }) => {
+        if (cancelled) return;
+        onConfirmed(activeSubscription);
+        setMessage("Your JobFlow Pro subscription is active.");
+      })
+      .catch((error: unknown) => {
+        if (!cancelled)
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : "Unable to verify your payment.",
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onConfirmed]);
+
+  return (
+    <div className="page-shell">
+      <div className="page-header">
+        <div className="page-title">
+          <h1>Subscription</h1>
+          <p className="small-muted" role="status">
+            {message}
+          </p>
+        </div>
+      </div>
+      <Link className="button-primary" to="/dashboard">
+        Return to dashboard
+      </Link>
+    </div>
+  );
+}
+
 function SettingsPage({
   setTheme,
   applications,
   preferences,
   setPreferences,
+  subscription,
   deleteAccount,
 }: {
   setTheme: (value: Theme) => void;
   applications: Application[];
   preferences: Preferences;
   setPreferences: (value: Preferences) => void;
+  subscription: Subscription;
   deleteAccount: () => void;
 }) {
+  const [billingError, setBillingError] = useState("");
+
+  const handleUpgrade = async () => {
+    setBillingError("");
+    try {
+      const checkout = await createCheckoutSession();
+      window.location.assign(checkout.url);
+    } catch (error) {
+      setBillingError(
+        error instanceof Error ? error.message : "Unable to start checkout",
+      );
+    }
+  };
+
   return (
     <div className="page-shell">
       <div className="page-header">
@@ -3013,6 +3183,34 @@ function SettingsPage({
       </div>
 
       <div className="settings-grid">
+        <div className="settings-card">
+          <h3>Subscription</h3>
+          <div className="task-list" style={{ marginTop: 14 }}>
+            <div className="task-item">
+              <span>Current plan</span>
+              <strong>
+                {subscription.plan === "pro" && subscription.status === "active"
+                  ? "Pro"
+                  : "Free"}
+              </strong>
+            </div>
+            {subscription.plan !== "pro" ? (
+              <button
+                className="button-primary"
+                type="button"
+                style={{ width: "100%" }}
+                onClick={() => void handleUpgrade()}
+              >
+                Upgrade to Pro
+              </button>
+            ) : null}
+            {billingError ? (
+              <div className="form-error" role="alert">
+                {billingError}
+              </div>
+            ) : null}
+          </div>
+        </div>
         <div className="settings-card">
           <h3>Account</h3>
           <div className="task-list" style={{ marginTop: 14 }}>
