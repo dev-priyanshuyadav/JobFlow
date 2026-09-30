@@ -4,7 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 
-const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
+const serverDirectory =
+  typeof __dirname === "string"
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
 const dataDirectory = path.join(serverDirectory, "data");
 const dataFile = path.join(dataDirectory, "jobflow.json");
 const port = Number(process.env.PORT || 3001);
